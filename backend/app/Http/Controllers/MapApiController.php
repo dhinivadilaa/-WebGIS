@@ -27,26 +27,29 @@ class MapApiController extends Controller
                 ->get();
 
             $features = $data->map(function ($item) {
+                // Guard: ST_AsGeoJSON() bisa mengembalikan null jika data spasial korup
+                $geometry = $item->geometry ? json_decode($item->geometry) : null;
+
                 return [
-                    'type' => 'Feature',
-                    'geometry' => json_decode($item->geometry),
+                    'type'       => 'Feature',
+                    'geometry'   => $geometry,
                     'properties' => [
-                        'id' => $item->id,
-                        'lokasi_detail' => $item->lokasi_detail,
+                        'id'                => $item->id,
+                        'lokasi_detail'     => $item->lokasi_detail,
                         'tingkat_kerusakan' => $item->tingkat_kerusakan,
-                        'tanggal_kejadian' => $item->tanggal_kejadian,
-                        'foto_kondisi' => $item->foto_kondisi,
+                        'tanggal_kejadian'  => $item->tanggal_kejadian,
+                        'foto_kondisi'      => $item->foto_kondisi,
                     ]
                 ];
             });
 
             return response()->json([
-                'type' => 'FeatureCollection',
+                'type'     => 'FeatureCollection',
                 'features' => $features
-            ], 200, [], JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+            ], 200, [], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
         } catch (\Exception $e) {
             return response()->json([
-                'status' => 'error',
+                'status'  => 'error',
                 'message' => 'Gagal mengambil data titik longsor: ' . $e->getMessage()
             ], 500);
         }
@@ -69,25 +72,28 @@ class MapApiController extends Controller
                 ->get();
 
             $features = $data->map(function ($item) {
+                // Guard: ST_AsGeoJSON() bisa mengembalikan null jika data spasial korup
+                $geometry = $item->geometry ? json_decode($item->geometry) : null;
+
                 return [
-                    'type' => 'Feature',
-                    'geometry' => json_decode($item->geometry),
+                    'type'       => 'Feature',
+                    'geometry'   => $geometry,
                     'properties' => [
-                        'id' => $item->id,
+                        'id'          => $item->id,
                         'kelas_rawan' => $item->kelas_rawan,
-                        'skor_total' => $item->skor_total,
-                        'luas_area' => $item->luas_area,
+                        'skor_total'  => $item->skor_total,
+                        'luas_area'   => $item->luas_area,
                     ]
                 ];
             });
 
             return response()->json([
-                'type' => 'FeatureCollection',
+                'type'     => 'FeatureCollection',
                 'features' => $features
-            ], 200, [], JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+            ], 200, [], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
         } catch (\Exception $e) {
             return response()->json([
-                'status' => 'error',
+                'status'  => 'error',
                 'message' => 'Gagal mengambil data zonasi rawan: ' . $e->getMessage()
             ], 500);
         }
@@ -117,6 +123,9 @@ class MapApiController extends Controller
             ])->get();
 
             $features = $data->map(function ($item) {
+                // Guard: ST_AsGeoJSON() bisa mengembalikan null jika koordinat tidak valid
+                $geometry = $item->geometry ? json_decode($item->geometry) : null;
+
                 // Bangun URL publik foto jika ada
                 $fotoUrl = null;
                 if ($item->foto_bukti) {
@@ -126,9 +135,10 @@ class MapApiController extends Controller
                         $fotoUrl = asset('storage/' . $item->foto_bukti);
                     }
                 }
+
                 return [
-                    'type' => 'Feature',
-                    'geometry' => json_decode($item->geometry),
+                    'type'       => 'Feature',
+                    'geometry'   => $geometry,
                     'properties' => [
                         'id_laporan'       => $item->id_laporan,
                         'deskripsi'        => $item->deskripsi,
@@ -141,9 +151,9 @@ class MapApiController extends Controller
             });
 
             return response()->json([
-                'type' => 'FeatureCollection',
+                'type'     => 'FeatureCollection',
                 'features' => $features
-            ], 200, [], JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+            ], 200, [], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
         } catch (\Exception $e) {
             return response()->json([
                 'status' => 'error',

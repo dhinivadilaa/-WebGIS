@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polygon, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
+import tnbbsBoundaryData from '../data/tnbbs_boundary.json';
 
 // Komponen helper untuk mengontrol pergerakan kamera peta (flyTo) secara halus
 function MapController({ activePoint }) {
@@ -92,24 +93,36 @@ const createSelectedIcon = () => {
   });
 };
 
-// Data Statis: Batas Kawasan TNBBS — Segmen Koridor Jalan Lintas Liwa–Krui
-// Referensi: KLHK/BBTNBBS (batas resmi kawasan), disederhanakan untuk visualisasi dashboard
-// Batas resmi (shapefile) tersedia di: https://ksdae.menlhk.go.id & https://www.globalforestwatch.org
-// Koridor membentang dari arah timur (Liwa, ~104.19°E) ke barat (Krui, ~103.93°E)
-const tnbbsPolygon = [
-  [-5.0500, 103.9500],  // sudut barat laut, dekat Krui
-  [-5.0600, 104.0400],  // sisi utara tengah
-  [-5.0750, 104.1000],  // sisi utara timur
-  [-5.0900, 104.1600],  // mendekati Liwa (utara)
-  [-5.1000, 104.1900],  // ujung timur, area Liwa
-  [-5.1500, 104.1900],  // sudut tenggara, area Liwa
-  [-5.1600, 104.1400],  // sisi selatan timur
-  [-5.1500, 104.0800],  // sisi selatan tengah
-  [-5.1350, 104.0200],  // sisi selatan barat
-  [-5.1200, 103.9700],  // sisi selatan, arah Krui
-  [-5.0900, 103.9300],  // sudut barat daya, dekat Krui
-  [-5.0500, 103.9500],  // kembali ke titik awal
-];
+// Data Batas Kawasan TNBBS dari file GeoJSON representatif
+// GeoJSON menyimpan koordinat sebagai [Lng, Lat], Leaflet membutuhkan [Lat, Lng]
+// Konversi dilakukan di sini agar konsisten dan tidak crash
+// Mendukung tipe geometri Polygon maupun MultiPolygon (guard error lengkap)
+const tnbbsPolygon = (() => {
+  try {
+    const geom = tnbbsBoundaryData?.geometry;
+    if (!geom || !geom.type || !Array.isArray(geom.coordinates)) {
+      console.warn('[TNBBS] Struktur GeoJSON tidak valid atau kosong.');
+      return [];
+    }
+    if (geom.type === 'Polygon') {
+      // Ambil ring pertama (exterior ring), balik urutan [Lng, Lat] → [Lat, Lng]
+      const ring = geom.coordinates[0];
+      if (!Array.isArray(ring) || ring.length < 3) return [];
+      return ring.map(([lng, lat]) => [lat, lng]);
+    }
+    if (geom.type === 'MultiPolygon') {
+      // Untuk MultiPolygon, ambil ring eksterior dari poligon pertama
+      const ring = geom.coordinates?.[0]?.[0];
+      if (!Array.isArray(ring) || ring.length < 3) return [];
+      return ring.map(([lng, lat]) => [lat, lng]);
+    }
+    console.warn('[TNBBS] Tipe geometri tidak dikenali:', geom.type);
+    return [];
+  } catch (e) {
+    console.error('[TNBBS] Gagal memuat data batas kawasan:', e);
+    return [];
+  }
+})();
 
 // Data Statis: Posko & Fasilitas Darurat BPBD & Kesehatan (Tabel 3.5)
 // Referensi koordinat:
@@ -363,12 +376,57 @@ export default function LandslideDashboard() {
   };
   const stats = getStats();
 
-  // Konversi GeoJSON Polygon ke Leaflet Koordinat Array
+  // Konversi GeoJSON Polygon/MultiPolygon ke Leaflet Koordinat Array
+  // Menangani kedua tipe geometri untuk mencegah crash saat data DB kompleks
   const convertPolygon = (geometry) => {
-    if (geometry.type === 'Polygon') {
-      return geometry.coordinates.map(ring => ring.map(coord => [coord[1], coord[0]]));
+    try {
+      // Guard: pastikan objek geometry valid sebelum diproses
+      if (!geometry || typeof geometry !== 'object') return [];
+      if (!geometry.type || !Array.isArray(geometry.coordinates)) return [];
+      if (geometry.coordinates.length === 0) return [];
+
+      // Helper: konversi satu ring [Lng, Lat][] → [Lat, Lng][] dengan validasi tiap titik
+      const convertRing = (ring) => {
+        if (!Array.isArray(ring) || ring.length < 3) return [];
+        return ring
+          .filter(coord => Array.isArray(coord) && coord.length >= 2 &&
+            isFinite(coord[0]) && isFinite(coord[1]))
+          .map(coord => [coord[1], coord[0]]); // [Lng,Lat] → [Lat,Lng]
+      };
+
+      if (geometry.type === 'Polygon') {
+        // Standar: array of rings (exterior + optional holes)
+        // Leaflet Polygon positions: [[lat,lng], ...] atau [[ring1], [ring2]] untuk holes
+        const rings = geometry.coordinates.map(convertRing).filter(r => r.length >= 3);
+        if (rings.length === 0) return [];
+        // Kembalikan ring pertama (eksterior) sebagai flat array agar kompatibel
+        return rings[0];
+      }
+
+      if (geometry.type === 'MultiPolygon') {
+        // MultiPolygon: array of Polygon
+        // Strategi: tampilkan tiap poligon sebagai sub-array (Leaflet mendukung ini)
+        // Hasilnya: [[ring_poly1_pts...], [ring_poly2_pts...], ...]
+        const allRings = geometry.coordinates
+          .map(polygon => {
+            // Setiap polygon = array of rings; ambil exterior ring (index 0)
+            const exteriorRing = polygon?.[0];
+            return convertRing(exteriorRing);
+          })
+          .filter(ring => ring.length >= 3);
+
+        if (allRings.length === 0) return [];
+        // Untuk MultiPolygon, kembalikan ring pertama agar tidak crash
+        // (Leaflet <Polygon> tidak natively render multi-polygon terpisah)
+        return allRings[0];
+      }
+
+      console.warn('[convertPolygon] Tipe geometri tidak dikenali:', geometry.type);
+      return [];
+    } catch (e) {
+      console.error('[convertPolygon] Gagal mengkonversi geometri:', geometry?.type, e);
+      return [];
     }
-    return [];
   };
 
   // Pewarnaan Poligon Berdasarkan Kategori Rawan (Choropleth Visuals)
